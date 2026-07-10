@@ -1,15 +1,14 @@
 /**
- * ADAS — Phase 3: on-device object detection + metric distance + lane zones.
+ * Main screen: camera preview, on-device detection, and the driving HUD.
  *
- * Pipeline (all local):
- *   VisionCamera frame  →  useFrameOutput worklet
- *     → letterbox to 320x320x3 float32  → fast-tflite YOLOv8n (CPU)
- *     → decode boxes/classes/scores (NMS) → runOnJS → React state → overlay
+ * Pipeline (all on-device):
+ *   VisionCamera frame -> useFrameOutput worklet
+ *     -> letterbox to 320x320x3 float32 -> fast-tflite YOLOv8n (CPU)
+ *     -> decode boxes/classes/scores (NMS) -> runOnJS -> React state -> overlay
  *
- * Each detection is placed in a lane zone (LEFT / FRONT / RIGHT) using the
- * original project's calibration ratios, and its distance is estimated in metres
- * from box height via the pinhole model (see src/logic/distance.ts). The nearest
- * object in the FRONT corridor is highlighted — that feeds the Phase 4 brake score.
+ * Each detection gets a lane zone (LEFT / FRONT / RIGHT) and a metric distance
+ * from its box height (see src/logic/distance.ts). The nearest object in the
+ * FRONT corridor drives the brake score and audio alert.
  */
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -29,6 +28,7 @@ import {
 } from 'react-native-vision-camera';
 import { useTensorflowModel } from 'react-native-fast-tflite';
 import { runOnJS } from 'react-native-worklets';
+import { Asset } from 'expo-asset';
 
 import { RELEVANT_CLASS_IDS, labelFor } from './src/constants/classes';
 import { estimateDistanceM, formatDistance } from './src/logic/distance';
@@ -53,9 +53,8 @@ const IOU_THRESHOLD = 0.45; // non-max suppression overlap
 // we only care about vehicles, people, bikes and animals (RELEVANT_CLASS_IDS).
 const DEBUG_SHOW_ALL = false;
 
-// Lane-zone boundaries as fractions of frame width (see Phase 1).
-const ZONE_LEFT_BOUNDARY = 0.381;
-const ZONE_RIGHT_BOUNDARY = 0.599;
+// Lane-zone boundaries live in calibration state now (src/logic/calibration.ts)
+// so they can be dragged on the calibration screen and persisted.
 
 type RawDetection = {
   cls: number;
@@ -77,29 +76,58 @@ function zoneForCenterX(cx: number, left: number, right: number): Zone {
 
 // Traffic-light coloring for the brake score (0..10).
 function scoreColor(s: number): string {
-  if (s >= 8) return '#ff3b30'; // red — brake now
+  if (s >= 8) return '#ff3b30'; // red: brake now
   if (s >= 6) return '#ff9f0a'; // orange
-  if (s >= 3) return '#ffd60a'; // yellow — following too close
-  return '#30d158'; // green — safe
+  if (s >= 3) return '#ffd60a'; // yellow: following too close
+  return '#30d158'; // green: safe
 }
 
 export default function App() {
   const { hasPermission, requestPermission } = useCameraPermission();
   const { width: SCREEN_W, height: SCREEN_H } = useWindowDimensions();
   const device = useCameraDevice('back');
+
+  // Resolve the model to a real file:// URI before handing it to fast-tflite.
+  // fast-tflite's native loader does `URL(uri).readBytes()`, which only accepts
+  // a scheme java.net.URL understands. In dev, require() resolves to a Metro
+  // http URL (fine), but in a standalone release build it resolves to a bare
+  // Android resource name that URL() can't parse, so the model fails to load
+  // ("model: error"). expo-asset copies the bundled model to the cache and
+  // gives a file:// path that works in both dev and release.
+  const [modelSource, setModelSource] =
+    useState<Parameters<typeof useTensorflowModel>[0]>(MODEL);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const asset = Asset.fromModule(MODEL);
+        if (!asset.localUri) await asset.downloadAsync();
+        const uri = asset.localUri ?? asset.uri;
+        if (!cancelled && uri) setModelSource({ url: uri });
+      } catch (e) {
+        console.log('[model] asset resolve failed:', String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // NOTE: the 'android-gpu' delegate produces NaN outputs for this float32 YOLOv8
   // model, so we run on CPU (XNNPACK). Revisit with an int8/GPU-friendly export.
-  const { model, state } = useTensorflowModel(MODEL, []);
+  const { model, state } = useTensorflowModel(modelSource, []);
 
   const [detections, setDetections] = useState<RawDetection[]>([]);
   const [frameDims, setFrameDims] = useState({ w: 1280, h: 720 });
   const [diag, setDiag] = useState<string>('starting…');
   const { speedMs: egoSpeedMs, hasGps, lat, lng } = useEgoSpeed();
   const { limitKmh, status: limitStatus } = useSpeedLimit(lat, lng);
+  const { cal, update: updateCal, reset: resetCal } = useCalibration();
   const [closingMs, setClosingMs] = useState(0);
+  const [screen, setScreen] = useState<'main' | 'calibrate'>('main');
   const lastFrontRef = useRef<{ d: number; t: number } | null>(null);
 
-  // Overspeed = more than 10 % over the current road's posted limit (feature #5).
+  // Overspeed = more than 10% over the current road's posted limit.
   const egoSpeedKmh = egoSpeedMs * 3.6;
   const overspeed = limitKmh != null && egoSpeedKmh > limitKmh * 1.1;
 
@@ -112,11 +140,11 @@ export default function App() {
     const cx = (d.xmin + d.xmax) / 2;
     return {
       ...d,
-      zone: zoneForCenterX(cx),
-      distanceM: estimateDistanceM(d.cls, d.ymax - d.ymin),
+      zone: zoneForCenterX(cx, cal.zoneLeft, cal.zoneRight),
+      distanceM: estimateDistanceM(d.cls, d.ymax - d.ymin, cal.vFovDeg),
     };
   });
-  // Nearest object in the FRONT corridor — what the brake score reacts to.
+  // Nearest object in the FRONT corridor; this is what the brake score reacts to.
   let nearestFront: (typeof objects)[number] | null = null;
   for (const o of objects) {
     if (o.zone !== 'FRONT' || o.distanceM == null) continue;
@@ -150,9 +178,9 @@ export default function App() {
     lastFrontRef.current = { d: frontDist, t: now };
   }, [frontDist]);
 
-  // Physics brake score for the nearest object ahead (Phase 4), and the audio
-  // alert it drives (Phase 5). Both must sit above the early returns (Rules of
-  // Hooks); the score is a pure function so recomputing each render is cheap.
+  // Brake score for the nearest object ahead, and the audio alert it drives.
+  // Both must sit above the early returns (Rules of Hooks); the score is a pure
+  // function, so recomputing each render is cheap.
   const assess: BrakeAssessment | null =
     frontDist != null ? brakeScore(egoSpeedMs, frontDist, closingMs) : null;
   useBrakeAlert(assess?.score ?? 0, overspeed, state === 'loaded');
@@ -214,13 +242,13 @@ export default function App() {
           fw = sw; fh = sh;
           ca = -1; cb = 0; cc = sw - 1; ra = 0; rb = -1; rc = sh - 1;
         } else {
-          // 'up' — no rotation (landscape sensor aligned with landscape screen)
+          // 'up': no rotation (landscape sensor aligned with landscape screen)
           fw = sw; fh = sh;
           ca = 1; cb = 0; cc = 0; ra = 0; rb = 1; rc = 0;
         }
 
         // Letterbox the UPRIGHT image into 320x320 preserving aspect (YOLO uses
-        // 114-gray padding; input is float32 [0,1]). Grayscale → R=G=B.
+        // 114-gray padding; input is float32 [0,1]). Grayscale, so R=G=B.
         const input = new Float32Array(INPUT_SIZE * INPUT_SIZE * 3);
         input.fill(114 / 255); // neutral padding
         const fitScale =
@@ -367,7 +395,7 @@ export default function App() {
     );
   }
 
-  // Map normalized frame coords → screen pixels, honoring the preview's 'cover'
+  // Map normalized frame coords to screen pixels, honoring the preview's 'cover'
   // crop (frame is scaled to fill the screen and centered; edges are clipped).
   const scale = Math.max(SCREEN_W / frameDims.w, SCREEN_H / frameDims.h);
   const dispW = frameDims.w * scale;
@@ -376,6 +404,9 @@ export default function App() {
   const offY = (SCREEN_H - dispH) / 2;
   const mapX = (nx: number) => offX + nx * dispW;
   const mapY = (ny: number) => offY + ny * dispH;
+  const unmapX = (x: number) => (dispW > 0 ? (x - offX) / dispW : 0);
+
+  const calibrating = screen === 'calibrate';
 
   return (
     <View style={styles.container}>
@@ -389,10 +420,34 @@ export default function App() {
         resizeMode="cover"
       />
 
+      {calibrating ? (
+        <CalibrationScreen
+          cal={cal}
+          onChange={updateCal}
+          onReset={resetCal}
+          onClose={() => setScreen('main')}
+          mapX={mapX}
+          unmapX={unmapX}
+          mapY={mapY}
+          dispW={dispW}
+          dispH={dispH}
+          objects={objects}
+          screenW={SCREEN_W}
+        />
+      ) : (
+        <MainOverlay />
+      )}
+    </View>
+  );
+
+  // The normal driving HUD (extracted so the return stays readable).
+  function MainOverlay() {
+    return (
+      <>
       {/* Lane-zone guides (mapped through the same crop transform) */}
       <View style={styles.overlay} pointerEvents="none">
-        <View style={[styles.zoneLine, { left: mapX(ZONE_LEFT_BOUNDARY) }]} />
-        <View style={[styles.zoneLine, { left: mapX(ZONE_RIGHT_BOUNDARY) }]} />
+        <View style={[styles.zoneLine, { left: mapX(cal.zoneLeft) }]} />
+        <View style={[styles.zoneLine, { left: mapX(cal.zoneRight) }]} />
       </View>
 
       {/* Detection boxes */}
@@ -437,14 +492,14 @@ export default function App() {
       <View style={styles.banner} pointerEvents="none">
         <Text style={styles.bannerText}>
           {state !== 'loaded'
-            ? `ADAS · model: ${state}`
+            ? `CrashGuard · model: ${state}`
             : nearestFront != null
               ? `AHEAD · ${labelFor(nearestFront.cls)} · ${formatDistance(nearestFront.distanceM!)}`
-              : 'ADAS · Phase 4 · road clear'}
+              : 'CrashGuard · road clear'}
         </Text>
       </View>
 
-      {/* Brake HUD — speed + speed-limit sign + physics brake score meter */}
+      {/* HUD: speed, speed-limit sign, and brake score meter */}
       <View style={styles.hud} pointerEvents="none">
         <View style={styles.hudTopRow}>
           <Text style={[styles.hudSpeed, overspeed && styles.hudSpeedOver]}>
@@ -491,8 +546,16 @@ export default function App() {
       <View style={styles.diagBar} pointerEvents="none">
         <Text style={styles.diagText}>{diag}</Text>
       </View>
-    </View>
-  );
+
+      <Pressable
+        style={styles.calibrateBtn}
+        onPress={() => setScreen('calibrate')}
+      >
+        <Text style={styles.calibrateText}>⚙ Calibrate</Text>
+      </Pressable>
+      </>
+    );
+  }
 }
 
 const styles = StyleSheet.create({
@@ -606,4 +669,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   diagText: { color: '#7CFC00', fontSize: 10, fontFamily: 'monospace' },
+  calibrateBtn: {
+    position: 'absolute',
+    right: 24,
+    bottom: 28,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 22,
+  },
+  calibrateText: { color: '#fff', fontSize: 14, fontWeight: '700' },
 });

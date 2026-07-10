@@ -3,8 +3,8 @@
  * (assets/models/yolov8n.tflite). The model's class index (0..79) maps directly
  * into this array (0 = person, 2 = car, 5 = bus, 7 = truck, ...).
  *
- * NOTE: this is the 80-class list (no gaps), which differs from EfficientDet's
- * 90-class map — animal indices in particular are shifted.
+ * Note: this is the 80-class list (no gaps), which differs from the 90-class
+ * COCO map (animal indices in particular are shifted).
  */
 export const COCO_LABELS: string[] = [
   'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train',
@@ -22,8 +22,8 @@ export const COCO_LABELS: string[] = [
 ];
 
 /**
- * Classes relevant to a driving collision-warning system — vehicles, people,
- * bikes, and animals that may wander onto the road (from the original project).
+ * Classes relevant to a collision-warning system: vehicles, people, bikes, and
+ * animals that may wander onto the road.
  */
 export const RELEVANT_CLASS_IDS: ReadonlySet<number> = new Set<number>([
   0,  // person
@@ -43,9 +43,9 @@ export const RELEVANT_CLASS_IDS: ReadonlySet<number> = new Set<number>([
 ]);
 
 /**
- * Approximate real-world HEIGHT (metres) per relevant class, used in Phase 3 to
- * convert a detection's pixel height into a metric distance via the pinhole
- * model: distance = focal_px * realHeight / boxHeight_px. Rough averages.
+ * Approximate real-world height (metres) per relevant class, used to convert a
+ * detection's pixel height into a metric distance via the pinhole model:
+ * distance = focal_px * realHeight / boxHeight_px. Rough averages.
  */
 export const CLASS_REAL_HEIGHT_M: Record<number, number> = {
   0: 1.7,  // person

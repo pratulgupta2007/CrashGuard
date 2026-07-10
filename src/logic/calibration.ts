@@ -1,13 +1,11 @@
 /**
- * User calibration — lane-zone boundaries and camera vertical FOV — persisted
- * on-device with expo-sqlite so it survives restarts. Tuned from the in-app
- * calibration screen.
+ * User calibration (lane-zone boundaries and camera vertical FOV), persisted
+ * with expo-sqlite so it survives restarts. Tuned from the calibration screen.
  *
- *   zoneLeft / zoneRight : FRAME-normalized x (0..1) of the two lane dividers.
- *                          A detection whose centre-x is < zoneLeft is LEFT,
- *                          > zoneRight is RIGHT, otherwise FRONT.
- *   vFovDeg              : vertical field of view used by the pinhole distance
- *                          model (src/logic/distance.ts).
+ *   zoneLeft / zoneRight : frame-normalized x (0..1) of the two lane dividers.
+ *                          centre-x < zoneLeft is LEFT, > zoneRight is RIGHT,
+ *                          otherwise FRONT.
+ *   vFovDeg              : vertical FOV for the pinhole distance model.
  */
 import { useCallback, useEffect, useState } from 'react';
 import * as SQLite from 'expo-sqlite';

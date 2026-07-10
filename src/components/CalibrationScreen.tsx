@@ -1,13 +1,13 @@
 /**
- * Full-screen calibration overlay, drawn on top of the live camera preview.
+ * Full-screen calibration overlay drawn on top of the live camera preview.
  *
- *   • Drag the two vertical handles to set the LEFT / FRONT / RIGHT lane
- *     dividers so FRONT matches your real driving corridor.
- *   • Slide "Distance tuning" to adjust the camera's vertical FOV until the live
- *     readout for a known object matches the tape-measured distance.
+ * Drag the two vertical handles to set the LEFT / FRONT / RIGHT lane dividers so
+ * FRONT matches your driving corridor. Slide "Distance tuning" to adjust the
+ * camera's vertical FOV until the live readout for a known object matches the
+ * tape-measured distance.
  *
- * The camera and detector keep running underneath (App owns them), so distances
- * update live as you slide — just point at an object at a known distance.
+ * The camera and detector keep running underneath (App owns them), so the
+ * distance readout updates live as you slide.
  */
 import { useMemo, useRef, useState } from 'react';
 import {
@@ -233,7 +233,7 @@ const YELLOW = '#ffd60a';
 const BLUE = '#0a84ff';
 
 const styles = StyleSheet.create({
-  root: { ...StyleSheet.absoluteFillObject },
+  root: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   detBox: {
     position: 'absolute',
     borderWidth: 1,

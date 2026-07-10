@@ -1,38 +1,33 @@
 /**
- * Phase 6 — offline speed-limit cache + lookup (feature #5: warn when > 10 %
- * over the current road's limit).
+ * Offline speed-limit cache and lookup.
  *
- * On boot (and whenever you drive out of the cached window) we pull every road
- * that has a `maxspeed` tag within WINDOW_RADIUS_KM of you from OpenStreetMap's
- * Overpass API, chop each road into straight segments, and store them in SQLite
- * keyed by a coarse lat/lng grid cell. Looking up "what's the limit here" then
- * just scans the segments in the current cell + its 8 neighbours and takes the
- * nearest one — all offline, no network while driving.
+ * On boot, and whenever you drive out of the cached window, pull every road with
+ * a `maxspeed` tag within WINDOW_RADIUS_KM from OpenStreetMap's Overpass API,
+ * split each road into straight segments, and store them in SQLite keyed by a
+ * coarse lat/lng grid cell. Lookups then scan the current cell plus its 8
+ * neighbours and take the nearest segment. No network while driving.
  */
 import * as SQLite from 'expo-sqlite';
 
 const DB_NAME = 'adas_speed.db';
 
-/** Radius of each cached window (user-chosen: 25 km, all road types). */
+// Radius of each cached window (km).
 export const WINDOW_RADIUS_KM = 25;
-/** Refetch once you're within this of the window edge, so it's ready in time. */
+// Refetch once within this of the window edge, so the next window is ready.
 const REFETCH_MARGIN_KM = 5;
-/** Spatial-index grid cell size (~2.2 km) — lookups scan this cell + neighbours. */
+// Spatial-index grid cell size in degrees (~2.2 km). Lookups scan cell + 8 neighbours.
 const CELL_DEG = 0.02;
-/** Max perpendicular distance to consider yourself "on" a road (metres).
- * Generous enough for wide multi-lane roads + GPS drift, tight enough not to
- * snap to a parallel street. (Indoors you may be >100 m from any road → no match.) */
+// Max perpendicular distance to count as "on" a road (m). Wide enough for
+// multi-lane roads and GPS drift, tight enough not to snap to a parallel street.
 const MATCH_MAX_M = 60;
-/**
- * Overpass mirrors, tried in order. The main endpoint frequently 504s / 406s on
- * heavy queries, so we fall through to faster mirrors. Kumi is usually quickest.
- */
+// Overpass mirrors, tried in order. The main .de endpoint frequently 504s/406s
+// on heavy queries and kumi can time out, so mail.ru is tried first.
 const OVERPASS_MIRRORS = [
   'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
   'https://overpass-api.de/api/interpreter',
 ];
-/** Give each mirror this long before moving on (ms). */
+// Per-mirror timeout before falling through (ms).
 const FETCH_TIMEOUT_MS = 45000;
 
 type SegRow = {
@@ -131,7 +126,7 @@ async function overpassFetch(query: string): Promise<Response> {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': 'ADAS/1.0 (on-device speed-limit cache)',
+          'User-Agent': 'CrashGuard/1.0 (on-device speed-limit cache)',
         },
         body: 'data=' + encodeURIComponent(query),
         signal: ctrl.signal,

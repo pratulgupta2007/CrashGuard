@@ -1,12 +1,10 @@
 /**
- * Phase 4/6 — our own motion from GPS (expo-location): speed over ground plus
- * current position (position feeds the Phase 6 speed-limit lookup, so we keep a
- * single location subscription rather than two).
+ * GPS motion from expo-location: speed over ground plus current position. Both
+ * come from one location subscription (position feeds the speed-limit lookup).
  *
- * Returns speed in m/s (never negative) and lat/lng (null until first fix).
- * `hasGps` is false until location permission is granted and a fix arrives.
- * BestForNavigation gives the Doppler-derived `coords.speed` most phones report,
- * which is smoother than differentiating positions ourselves.
+ * speedMs is never negative; lat/lng are null until the first fix; hasGps is
+ * false until permission is granted and a fix arrives. BestForNavigation gives
+ * the Doppler-derived coords.speed, smoother than differentiating positions.
  */
 import { useEffect, useState } from 'react';
 import * as Location from 'expo-location';

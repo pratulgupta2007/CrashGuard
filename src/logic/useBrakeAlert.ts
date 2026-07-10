@@ -1,14 +1,11 @@
 /**
- * Phase 5 — the non-annoying audio alert (feature #4: no mechanical braking,
- * just a timely sound).
+ * Audio alerts. Two brake tiers plus an overspeed chirp, each on its own
+ * cooldown so they warn without nagging:
+ *   caution   (score >= 6): double 740 Hz beep, min every 2.5s
+ *   imminent  (score >= 8): rising 3-tone alert, min every 1.2s
+ *   overspeed (>10% over limit): the caution beep, min every 5s
  *
- * Two tiers, each on its own cooldown so it warns without nagging:
- *   • caution (score ≥ 6): a soft 660 Hz beep, at most every 2.5 s
- *   • imminent (score ≥ 8): a sharper 880 Hz tone, at most every 1.2 s
- *
- * Plus a Phase 6 overspeed chirp (soft beep, every 5 s) when you're > 10 % over
- * the road's limit. Sounds play even with the phone on silent (it's a safety
- * alert) and briefly duck other audio (music/nav) rather than stopping it.
+ * Sounds play at full volume over silent mode and duck (not stop) other audio.
  */
 import { useEffect, useRef } from 'react';
 import { useAudioPlayer, setAudioModeAsync } from 'expo-audio';
@@ -22,12 +19,16 @@ const CAUTION_COOLDOWN_MS = 2500;
 const ALERT_COOLDOWN_MS = 1200;
 const OVERSPEED_COOLDOWN_MS = 5000;
 
-function play(player: ReturnType<typeof useAudioPlayer>): void {
+type Player = ReturnType<typeof useAudioPlayer>;
+
+function play(player: Player, tag: string): void {
   try {
+    player.volume = 1.0;
     player.seekTo(0);
     player.play();
-  } catch {
-    // player not ready yet — skip this beat, a later tick will retry
+    console.log(`[alert] ▶ ${tag}`);
+  } catch (e) {
+    console.log(`[alert] play(${tag}) failed:`, String(e));
   }
 }
 
@@ -41,14 +42,27 @@ export function useBrakeAlert(
   const lastBrakeRef = useRef(0);
   const lastOverspeedRef = useRef(0);
 
-  // Route audio so a driving alert is actually heard.
+  // Route audio so a driving alert is actually heard: full volume, over silent
+  // mode, ducking (not stopping) any music/nav audio.
   useEffect(() => {
     setAudioModeAsync({
       playsInSilentMode: true,
       interruptionMode: 'duckOthers',
       shouldPlayInBackground: false,
-    }).catch(() => {});
-  }, []);
+    }).catch((e) => console.log('[alert] setAudioMode failed:', String(e)));
+    beep.volume = 1.0;
+    alert.volume = 1.0;
+  }, [beep, alert]);
+
+  // Dev-only self-test: chirp once after launch to confirm the audio path
+  // without triggering a real brake event. __DEV__ is false in release, so this
+  // is stripped from the production build. (Kept from debugging the silent-alert
+  // bug where the players were fine but the tone was too quiet/short to notice.)
+  useEffect(() => {
+    if (!__DEV__) return;
+    const t = setTimeout(() => play(alert, 'self-test'), 2500);
+    return () => clearTimeout(t);
+  }, [alert]);
 
   // Collision brake alert.
   useEffect(() => {
@@ -59,15 +73,15 @@ export function useBrakeAlert(
     const cooldown = level === 2 ? ALERT_COOLDOWN_MS : CAUTION_COOLDOWN_MS;
     if (now - lastBrakeRef.current < cooldown) return;
     lastBrakeRef.current = now;
-    play(level === 2 ? alert : beep);
+    play(level === 2 ? alert : beep, level === 2 ? 'imminent' : 'caution');
   }, [score, enabled, beep, alert]);
 
-  // Overspeed chirp (Phase 6).
+  // Overspeed chirp.
   useEffect(() => {
     if (!enabled || !overspeed) return;
     const now = Date.now();
     if (now - lastOverspeedRef.current < OVERSPEED_COOLDOWN_MS) return;
     lastOverspeedRef.current = now;
-    play(beep);
+    play(beep, 'overspeed');
   }, [overspeed, enabled, beep]);
 }

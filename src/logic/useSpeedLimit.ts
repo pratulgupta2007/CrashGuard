@@ -1,10 +1,8 @@
 /**
- * Phase 6 — React glue for the speed-limit cache.
- *
- * Given the live GPS position it (a) fetches/refetches the 25 km window when you
- * enter a new area, and (b) throttles nearest-road lookups to ~1.5 s so we're
- * not hammering SQLite every GPS tick. Returns the current limit (km/h) and a
- * coarse status for the UI.
+ * React glue for the speed-limit cache. From the live GPS position it refetches
+ * the window when you enter a new area and throttles nearest-road lookups to
+ * ~1.5s (so SQLite isn't hit every GPS tick). Returns the current limit (km/h)
+ * and a coarse status for the UI.
  */
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -31,7 +29,7 @@ export function useSpeedLimit(
 
     (async () => {
       try {
-        // (a) Window management — fetch a fresh window if we've moved out of range.
+        // Fetch a fresh window if we've moved out of range.
         const center = await getWindowCenter();
         if (needsRefetch(lat, lng, center) && !fetchingRef.current) {
           fetchingRef.current = true;
@@ -47,7 +45,7 @@ export function useSpeedLimit(
           }
         }
 
-        // (b) Throttled nearest-road lookup.
+        // Throttled nearest-road lookup.
         const now = Date.now();
         if (now - lastLookupRef.current >= 1500) {
           lastLookupRef.current = now;
