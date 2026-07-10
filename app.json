@@ -1,0 +1,62 @@
+{
+  "expo": {
+    "name": "ADAS",
+    "slug": "ADAS",
+    "version": "1.0.0",
+    "orientation": "landscape",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.adas.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "ADAS uses the camera to detect vehicles and obstacles on the road ahead and warn you in time.",
+        "NSLocationWhenInUseUsageDescription": "ADAS uses your location to measure your speed and check the current road's speed limit."
+      }
+    },
+    "android": {
+      "package": "com.adas.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-dev-client",
+      "expo-audio",
+      "expo-sqlite",
+      [
+        "react-native-fast-tflite",
+        {
+          "enableAndroidGpuLibraries": true
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "ADAS uses your location to measure your speed and check the current road's speed limit."
+        }
+      ],
+      "expo-asset",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26
+          }
+        }
+      ]
+    ]
+  }
+}
