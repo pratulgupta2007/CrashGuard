@@ -6,10 +6,6 @@ close and how dangerous the vehicles ahead are, and warns you with sound before 
 too close or too fast. Everything runs **on the device** — object detection, distance,
 physics, and the speed-limit lookup all work offline; there is no server and no cloud.
 
-It's a from-scratch rebuild of a 2022 project ("Smart Bumper") that used a laptop, a
-webcam and a Python/OpenCV script. This version does the same job locally on a phone,
-with the crude box-height heuristic replaced by a real kinematic model.
-
 ## Features
 
 - **On-device object detection** — a YOLOv8n TFLite model runs per frame and detects
